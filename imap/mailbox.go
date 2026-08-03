@@ -435,7 +435,13 @@ func (mbox *mailbox) SearchMessages(isUID bool, c *imap.SearchCriteria) ([]uint3
 	return results, nil
 }
 
-func (mbox *mailbox) CreateMessage(flags []string, date time.Time, body imap.Literal) error {
+func (mbox *mailbox) CreateMessage(flags []string, date time.Time, body imap.Literal) (err error) {
+	defer func() {
+		if err != nil {
+			log.Printf("Cannot append message to mailbox %q: %v", mbox.name, err)
+		}
+	}()
+
 	if mbox.label != protonmail.LabelDraft {
 		return errors.New("cannot create messages outside the Drafts mailbox")
 	}
@@ -444,7 +450,7 @@ func (mbox *mailbox) CreateMessage(flags []string, date time.Time, body imap.Lit
 		return err
 	}
 
-	_, err := createMessage(mbox.u.c, mbox.u.u, mbox.u.privateKeys, mbox.u.addrs, body)
+	_, err = createMessage(mbox.u.c, mbox.u.u, mbox.u.privateKeys, mbox.u.addrs, body)
 	if err != nil {
 		return err
 	}
