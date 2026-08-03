@@ -46,6 +46,30 @@ func protonmailAddressList(addresses []*mail.Address) []*protonmail.MessageAddre
 	return l
 }
 
+func draftMessageFromHeader(header mail.Header) (*protonmail.Message, error) {
+	subject, _ := header.Subject()
+	fromList, _ := header.AddressList("From")
+	toList, _ := header.AddressList("To")
+	ccList, _ := header.AddressList("Cc")
+	bccList, _ := header.AddressList("Bcc")
+
+	if len(fromList) != 1 {
+		return nil, errors.New("the From field must contain exactly one address")
+	}
+
+	return &protonmail.Message{
+		ToList:  protonmailAddressList(toList),
+		CCList:  protonmailAddressList(ccList),
+		BCCList: protonmailAddressList(bccList),
+		Subject: subject,
+		Header:  formatHeader(header),
+		Sender: &protonmail.MessageAddress{
+			Address: fromList[0].Address,
+			Name:    fromList[0].Name,
+		},
+	}, nil
+}
+
 func imapAddress(addr *protonmail.MessageAddress) *imap.Address {
 	parts := strings.SplitN(addr.Address, "@", 2)
 	if len(parts) < 2 {
@@ -378,20 +402,12 @@ func createMessage(c *protonmail.Client, u *protonmail.User, privateKeys openpgp
 		return nil, err
 	}
 
-	subject, _ := mr.Header.Subject()
-	fromList, _ := mr.Header.AddressList("From")
-	toList, _ := mr.Header.AddressList("To")
-	ccList, _ := mr.Header.AddressList("Cc")
-	bccList, _ := mr.Header.AddressList("Bcc")
-
-	if len(fromList) != 1 {
-		return nil, errors.New("the From field must contain exactly one address")
-	}
-	if len(toList) == 0 && len(ccList) == 0 && len(bccList) == 0 {
-		return nil, errors.New("no recipient specified")
+	msg, err := draftMessageFromHeader(mr.Header)
+	if err != nil {
+		return nil, err
 	}
 
-	fromAddrStr := fromList[0].Address
+	fromAddrStr := msg.Sender.Address
 	var fromAddr *protonmail.Address
 	for _, addr := range addrs {
 		if strings.EqualFold(addr.Email, fromAddrStr) {
@@ -423,18 +439,7 @@ func createMessage(c *protonmail.Client, u *protonmail.User, privateKeys openpgp
 		return nil, errors.New("sender address key hasn't been decrypted")
 	}
 
-	msg := &protonmail.Message{
-		ToList:    protonmailAddressList(toList),
-		CCList:    protonmailAddressList(ccList),
-		BCCList:   protonmailAddressList(bccList),
-		Subject:   subject,
-		Header:    formatHeader(mr.Header),
-		AddressID: fromAddr.ID,
-		Sender: &protonmail.MessageAddress{
-			Address: fromAddrStr,
-			Name:    fromList[0].Name,
-		},
-	}
+	msg.AddressID = fromAddr.ID
 
 	// Create an empty draft
 	plaintext, err := msg.Encrypt([]*openpgp.Entity{privateKey}, privateKey)
