@@ -57,12 +57,13 @@ func authWithHumanVerification(c *protonmail.Client, username, password string) 
 	var hv *protonmail.HumanVerification
 	for attempt := 1; ; attempt++ {
 		// A fresh SRP session is needed for every attempt
+		c.HumanVerification = hv
 		authInfo, err := c.AuthInfo(username)
 		if err != nil {
+			c.HumanVerification = nil
 			return nil, err
 		}
 
-		c.HumanVerification = hv
 		a, err := c.Auth(username, password, authInfo)
 		c.HumanVerification = nil
 		if err == nil {

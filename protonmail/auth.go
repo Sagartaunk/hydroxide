@@ -56,6 +56,7 @@ func (c *Client) AuthInfo(username string) (*AuthInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.setHumanVerification(req)
 
 	var respData AuthInfoResp
 	if err := c.doJSON(req, &respData); err != nil {
