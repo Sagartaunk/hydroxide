@@ -133,6 +133,7 @@ func (c *Client) Auth(username, password string, info *AuthInfo) (*Auth, error) 
 	if err != nil {
 		return nil, err
 	}
+	c.setHumanVerification(req)
 
 	var respData authResp
 	if err := c.doJSON(req, &respData); err != nil {

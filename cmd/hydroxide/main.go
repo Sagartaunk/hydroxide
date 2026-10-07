@@ -48,6 +48,41 @@ func newClient() *protonmail.Client {
 	}
 }
 
+// authWithHumanVerification logs in to ProtonMail. If the server answers that
+// human verification (CAPTCHA) is required, it asks the user to complete the
+// challenge in a web browser, then retries the login with the verified token.
+func authWithHumanVerification(c *protonmail.Client, username, password string) (*protonmail.Auth, error) {
+	const maxAttempts = 3
+
+	var hv *protonmail.HumanVerification
+	for attempt := 1; ; attempt++ {
+		// A fresh SRP session is needed for every attempt
+		authInfo, err := c.AuthInfo(username)
+		if err != nil {
+			return nil, err
+		}
+
+		c.HumanVerification = hv
+		a, err := c.Auth(username, password, authInfo)
+		c.HumanVerification = nil
+		if err == nil {
+			return a, nil
+		}
+
+		apiErr, ok := err.(*protonmail.APIError)
+		if !ok || apiErr.HumanVerification() == nil || attempt >= maxAttempts {
+			return nil, err
+		}
+		hv = apiErr.HumanVerification()
+
+		fmt.Fprintf(os.Stderr, "\nProtonMail requires human verification (CAPTCHA) before logging in.\n")
+		fmt.Fprintf(os.Stderr, "1. Open this link in a web browser and complete the challenge:\n\n   %v\n\n", hv.URL())
+		fmt.Fprintf(os.Stderr, "2. Once it reports success, come back here and press Enter to continue... ")
+		bufio.NewReader(os.Stdin).ReadString('\n')
+		fmt.Fprintf(os.Stderr, "\n")
+	}
+}
+
 func askPass(prompt string) ([]byte, error) {
 	f := os.Stdin
 	if !term.IsTerminal(int(f.Fd())) {
@@ -288,12 +323,8 @@ func main() {
 				loginPassword = string(pass)
 			}
 
-			authInfo, err := c.AuthInfo(username)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			a, err = c.Auth(username, loginPassword, authInfo)
+			var err error
+			a, err = authWithHumanVerification(c, username, loginPassword)
 			if err != nil {
 				log.Fatal(err)
 			}

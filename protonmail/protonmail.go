@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ProtonMail/go-crypto/openpgp"
@@ -23,6 +24,12 @@ const headerAPIVersion = "X-Pm-Apiversion"
 type resp struct {
 	Code int
 	*RawAPIError
+
+	// Details is only populated by the API on some errors (e.g. when human
+	// verification is required). It lives here rather than in RawAPIError so
+	// that a successful response carrying a "Details" key is not mistaken for
+	// an error.
+	Details json.RawMessage `json:"Details,omitempty"`
 }
 
 func (r *resp) Err() error {
@@ -30,6 +37,7 @@ func (r *resp) Err() error {
 		return &APIError{
 			Code:    r.Code,
 			Message: err.Message,
+			Details: r.Details,
 		}
 	}
 	return nil
@@ -46,10 +54,46 @@ type RawAPIError struct {
 type APIError struct {
 	Code    int
 	Message string
+
+	// Details holds the raw, endpoint-specific error details, if any.
+	Details json.RawMessage
 }
 
 func (err *APIError) Error() string {
 	return fmt.Sprintf("[%v] %v", err.Code, err.Message)
+}
+
+// ErrCodeHumanVerificationRequired is the API error code returned when the
+// server wants the client to complete a human verification challenge (usually
+// a CAPTCHA) before it will accept the request.
+const ErrCodeHumanVerificationRequired = 9001
+
+// HumanVerification describes a human verification challenge. It is both what
+// the server asks for (see APIError.HumanVerification) and what the client
+// sends back, once the challenge has been completed in a browser, via
+// Client.HumanVerification.
+type HumanVerification struct {
+	Methods []string `json:"HumanVerificationMethods"`
+	Token   string   `json:"HumanVerificationToken"`
+}
+
+// URL returns the page on which the user can complete the challenge.
+func (hv *HumanVerification) URL() string {
+	return fmt.Sprintf("https://verify.proton.me/?methods=%v&token=%v",
+		strings.Join(hv.Methods, ","), hv.Token)
+}
+
+// HumanVerification returns the verification challenge attached to the error,
+// or nil if the error is not a (well-formed) human verification request.
+func (err *APIError) HumanVerification() *HumanVerification {
+	if err.Code != ErrCodeHumanVerificationRequired || len(err.Details) == 0 {
+		return nil
+	}
+	hv := new(HumanVerification)
+	if json.Unmarshal(err.Details, hv) != nil || hv.Token == "" {
+		return nil
+	}
+	return hv
 }
 
 type Timestamp int64
@@ -67,6 +111,11 @@ type Client struct {
 	HTTPClient *http.Client
 	ReAuth     func() error
 
+	// HumanVerification, if set, is sent along with authentication requests.
+	// Set it to the challenge returned by a previous failed attempt (see
+	// APIError.HumanVerification) once the user has completed it in a browser.
+	HumanVerification *HumanVerification
+
 	uid         string
 	accessToken string
 	keyRing     openpgp.EntityList
@@ -76,6 +125,13 @@ func (c *Client) setRequestAuthorization(req *http.Request) {
 	if c.uid != "" && c.accessToken != "" {
 		req.Header.Set("X-Pm-Uid", c.uid)
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	}
+}
+
+func (c *Client) setHumanVerification(req *http.Request) {
+	if hv := c.HumanVerification; hv != nil {
+		req.Header.Set("X-Pm-Human-Verification-Token", hv.Token)
+		req.Header.Set("X-Pm-Human-Verification-Token-Type", strings.Join(hv.Methods, ","))
 	}
 }
 
@@ -178,6 +234,10 @@ func (c *Client) doJSON(req *http.Request, respData interface{}) error {
 
 	if maybeError, ok := respData.(maybeError); ok {
 		if err := maybeError.Err(); err != nil {
+			if apiErr, ok := err.(*APIError); ok && apiErr.HumanVerification() != nil {
+				// Not a failure per se: callers are expected to prompt the user
+				return err
+			}
 			log.Printf("request failed: %v %v: %v", req.Method, req.URL.String(), err)
 			return err
 		}
