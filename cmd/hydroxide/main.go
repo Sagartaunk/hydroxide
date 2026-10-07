@@ -84,6 +84,17 @@ func authWithHumanVerification(c *protonmail.Client, username, password string) 
 }
 
 func askPass(prompt string) ([]byte, error) {
+	// TEMPORARY DEBUG: set HYDROXIDE_SHOW_PASSWORD=1 to echo what you type.
+	// Remove this block once you are done testing.
+	if os.Getenv("HYDROXIDE_SHOW_PASSWORD") != "" {
+		fmt.Fprintf(os.Stderr, "%v (VISIBLE): ", prompt)
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		for len(line) > 0 && (line[len(line)-1] == '\n' || line[len(line)-1] == '\r') {
+			line = line[:len(line)-1]
+		}
+		return []byte(line), err
+	}
+
 	f := os.Stdin
 	if !term.IsTerminal(int(f.Fd())) {
 		// This can happen if stdin is used for piping data
