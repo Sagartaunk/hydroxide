@@ -1,5 +1,9 @@
 # hydroxide
 
+## NOTE: 
+This fork contains minimal patches to make hydroxide compatible with modern proton api.
+The original repo can be found at `https://codeberg.org/emersion/hydroxide`
+
 [![Casual Maintenance Intended](https://casuallymaintained.tech/badge.svg)](https://casuallymaintained.tech/)
 
 A third-party, open-source ProtonMail bridge. For power users only, designed to
@@ -39,7 +43,7 @@ setup information.
 Start by installing hydroxide:
 
 ```shell
-git clone https://github.com/emersion/hydroxide.git
+git clone https://github.com/sagartaunk/hydroxide.git
 go build ./cmd/hydroxide
 ```
 
